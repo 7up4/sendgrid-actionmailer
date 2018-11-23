@@ -10,7 +10,7 @@ module SendGridActionMailer
     include SendGrid
 
     DEFAULTS = {
-      raise_delivery_errors: false
+        raise_delivery_errors: false
     }.freeze
 
     attr_accessor :settings, :api_key
@@ -25,7 +25,13 @@ module SendGridActionMailer
         m.reply_to = to_email(mail.reply_to)
         m.subject = mail.subject
         # https://sendgrid.com/docs/Classroom/Send/v3_Mail_Send/personalizations.html
-        m.add_personalization(to_personalizations(mail))
+        if mail.to.is_a?(::Mail::AddressContainer)
+          mail.to.size.times do |index|
+            m.add_personalization(to_personalizations(mail, index))
+          end
+        else
+          m.add_personalization(to_personalizations(mail, nil))
+        end
       end
 
       add_api_key(sendgrid_mail, mail)
@@ -75,18 +81,35 @@ module SendGridActionMailer
       end
     end
 
-    def to_personalizations(mail)
-      Personalization.new.tap do |p|
-        to_emails(mail.to).each { |to| p.add_to(to) }
-        to_emails(mail.cc).each { |cc| p.add_cc(cc) }
-        to_emails(mail.bcc).each { |bcc| p.add_bcc(bcc) }
+    def to_personalizations(mail, index)
+      if index
+        Personalization.new.tap do |p|
+          to_emails(mail.to[index]).each { |to| p.add_to(to) }
 
-        if mail['dynamic_template_data']
-          p.add_dynamic_template_data(json_parse(mail['dynamic_template_data'].value))
+          if mail['dynamic_template_data']
+            p.add_dynamic_template_data(json_parse(mail['dynamic_template_data'].value))
+          end
+          if mail['sub']
+            json_parse(mail['sub'].value, false).each do |key, value|
+              p.add_substitution(Substitution.new(key: key, value: value[index]))
+            end
+          end
         end
-        p.add_substitution(Substitution.new(key: "%asm_group_unsubscribe_raw_url%", value: "<%asm_group_unsubscribe_raw_url%>"))
-        p.add_substitution(Substitution.new(key: "%asm_global_unsubscribe_raw_url%", value: "<%asm_global_unsubscribe_raw_url%>"))
-        p.add_substitution(Substitution.new(key: "%asm_preferences_raw_url%", value: "<%asm_preferences_raw_url%>"))
+      else
+        Personalization.new.tap do |p|
+          to_emails(mail.to).each { |to| p.add_to(to) }
+          to_emails(mail.cc).each { |cc| p.add_cc(cc) }
+          to_emails(mail.bcc).each { |bcc| p.add_bcc(bcc) }
+
+          if mail['dynamic_template_data']
+            p.add_dynamic_template_data(json_parse(mail['dynamic_template_data'].value))
+          end
+          if mail['sub']
+            json_parse(mail['sub'].value, false).each do |key, value|
+              p.add_substitution(Substitution.new(key: key, value: value))
+            end
+          end
+        end
       end
     end
 
@@ -140,7 +163,7 @@ module SendGridActionMailer
 
     def add_send_options(sendgrid_mail, mail)
       if mail['template_id']
-         sendgrid_mail.template_id = mail['template_id'].to_s
+        sendgrid_mail.template_id = mail['template_id'].to_s
       end
       if mail['sections']
         json_parse(mail['sections'].value, false).each do |key, value|
